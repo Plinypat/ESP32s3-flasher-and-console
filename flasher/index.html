@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hive Voice Flasher</title>
+  <script src="https://unpkg.com/esptool-js@0.4.3/bundle.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #111827; color: #f9fafb; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .card { background: #1f2937; border: 1px solid #374151; border-radius: 16px; padding: 2rem; width: 100%; max-width: 500px; }
+    h1 { font-size: 1.5rem; font-weight: 700; color: #fbbf24; margin-bottom: 0.25rem; }
+    p.sub { color: #9ca3af; font-size: 0.875rem; margin-bottom: 1.5rem; }
+    label { display: block; font-size: 0.8rem; font-weight: 600; color: #d1d5db; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    select, .file-info { width: 100%; padding: 0.6rem 0.75rem; background: #111827; border: 1px solid #374151; border-radius: 8px; color: #f9fafb; font-size: 0.875rem; margin-bottom: 1rem; }
+    button { width: 100%; padding: 0.75rem; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.15s; margin-bottom: 0.75rem; }
+    #connectBtn { background: #2563eb; color: #fff; }
+    #connectBtn:hover { background: #1d4ed8; }
+    #flashBtn { background: #fbbf24; color: #111827; }
+    #flashBtn:hover { background: #f59e0b; }
+    #flashBtn:disabled, #connectBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .progress-wrap { background: #374151; border-radius: 999px; height: 10px; overflow: hidden; margin-bottom: 1rem; display: none; }
+    .progress-bar { height: 100%; background: #fbbf24; transition: width 0.2s; width: 0%; }
+    #status { font-size: 0.85rem; color: #9ca3af; min-height: 1.5rem; }
+    #status.ok { color: #34d399; }
+    #status.err { color: #f87171; }
+    .step { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 0.8rem; color: #6b7280; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #374151; flex-shrink: 0; }
+    .dot.done { background: #34d399; }
+    .dot.active { background: #fbbf24; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>Hive Voice Flasher</h1>
+  <p class="sub">Flash Hive firmware to your ESP32-S3 board directly from the browser.</p>
+
+  <label for="versionSelect">Firmware Version</label>
+  <select id="versionSelect"><option value="">Loading versions…</option></select>
+
+  <div class="step"><div class="dot" id="dot1"></div> Select firmware version</div>
+  <div class="step"><div class="dot" id="dot2"></div> Connect board via USB</div>
+  <div class="step"><div class="dot" id="dot3"></div> Flash firmware</div>
+  <div class="step"><div class="dot" id="dot4"></div> Done — press RST on board</div>
+
+  <br>
+  <button id="connectBtn" onclick="connectPort()">Connect Board</button>
+  <button id="flashBtn" onclick="flashFirmware()" disabled>Flash Firmware</button>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+  <div id="status">Waiting…</div>
+</div>
+
+<script>
+  const API = 'https://api.wifiwatch.net';
+  let port = null;
+  let firmwareUrl = null;
+
+  async function loadVersions() {
+    try {
+      const res = await fetch(`${API}/ota/versions`);
+      const versions = await res.json();
+      const sel = document.getElementById('versionSelect');
+      if (!versions.length) { sel.innerHTML = '<option>No firmware available</option>'; return; }
+      sel.innerHTML = versions.map(v =>
+        `<option value="${v.id}" data-url="${v.download_url || ''}">${v.version}${v.is_latest ? ' (latest)' : ''}</option>`
+      ).join('');
+      sel.addEventListener('change', onVersionChange);
+      onVersionChange();
+      dot('dot1', 'done');
+    } catch (e) {
+      document.getElementById('versionSelect').innerHTML = '<option>Failed to load versions</option>';
+      setStatus('Could not reach API: ' + e.message, 'err');
+    }
+  }
+
+  function onVersionChange() {
+    const opt = document.getElementById('versionSelect').selectedOptions[0];
+    firmwareUrl = opt?.dataset?.url || null;
+  }
+
+  async function connectPort() {
+    try {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      await port.close();
+      setStatus('Board connected. Ready to flash.', 'ok');
+      dot('dot2', 'done');
+      document.getElementById('flashBtn').disabled = false;
+    } catch (e) {
+      setStatus('Connect failed: ' + e.message, 'err');
+    }
+  }
+
+  async function flashFirmware() {
+    if (!port) return setStatus('Connect the board first.', 'err');
+    const sel = document.getElementById('versionSelect');
+    const opt = sel.selectedOptions[0];
+    if (!opt) return setStatus('Select a firmware version.', 'err');
+
+    // Resolve download URL — fetch from versions list
+    const versionsRes = await fetch(`${API}/ota/versions`);
+    const versions = await versionsRes.json();
+    const version = versions[sel.selectedIndex];
+    if (!version) return setStatus('Version not found.', 'err');
+
+    setStatus('Downloading firmware…');
+    dot('dot3', 'active');
+    showProgress(0);
+
+    let binData;
+    try {
+      const r = await fetch(version.url || `${API}/ota/firmware/${version.version}.bin`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      binData = new Uint8Array(await r.arrayBuffer());
+    } catch (e) {
+      return setStatus('Download failed: ' + e.message, 'err');
+    }
+
+    setStatus('Flashing… do not disconnect.');
+    try {
+      const espLoader = new ESPLoader({
+        transport: new Transport(port, true),
+        baudrate: 460800,
+        terminal: { clean() {}, writeLine(s) { console.log(s); }, write(s) { console.log(s); } },
+      });
+
+      await espLoader.main();
+      await espLoader.flashId();
+
+      await espLoader.writeFlash({
+        fileArray: [{ data: binData, address: 0x0 }],
+        flashSize: 'keep',
+        flashMode: 'keep',
+        flashFreq: 'keep',
+        eraseAll: false,
+        compress: true,
+        reportProgress(idx, written, total) {
+          showProgress(Math.round((written / total) * 100));
+        },
+      });
+
+      await espLoader.hardReset();
+      setStatus('Flash complete! Press RST on the board.', 'ok');
+      dot('dot3', 'done');
+      dot('dot4', 'done');
+    } catch (e) {
+      setStatus('Flash failed: ' + e.message, 'err');
+      dot('dot3', '');
+    }
+  }
+
+  function showProgress(pct) {
+    document.getElementById('progressWrap').style.display = 'block';
+    document.getElementById('progressBar').style.width = pct + '%';
+  }
+
+  function setStatus(msg, cls) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = cls || '';
+  }
+
+  function dot(id, state) {
+    const el = document.getElementById(id);
+    el.className = 'dot' + (state ? ' ' + state : '');
+  }
+
+  loadVersions();
+</script>
+</body>
+</html>
