@@ -8,6 +8,26 @@ const MODELS = {
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
 };
 
+const PRESET_VOICES = [
+  { id: 'custom', name: '— Enter custom Voice ID —' },
+  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (American Female, Calm)' },
+  { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi (American Female, Strong)' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella (American Female, Soft)' },
+  { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni (American Male, Well-rounded)' },
+  { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli (American Female, Emotional)' },
+  { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh (American Male, Deep)' },
+  { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold (American Male, Crisp)' },
+  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam (American Male, Deep)' },
+  { id: 'yoZ06aMxZJJ28mfd3POQ', name: 'Sam (American Male, Raspy)' },
+  { id: 'onwK4e9ZLuTAKqWW03F9', name: 'Daniel (British Male, Authoritative)' },
+  { id: 'XB0fDUnXU5powFXDhCwa', name: 'Charlotte (Swedish Female, Seductive)' },
+  { id: 'jBpfuIE2acCO8z3wKNLl', name: 'Matilda (American Female, Warm)' },
+  { id: 'N2lVS1w4EtoT3dr4eOWO', name: 'Callum (Transatlantic Male, Intense)' },
+  { id: 'CYw3kZ02Hs0563khs1Fj', name: 'Dave (British-Essex Male, Conversational)' },
+  { id: 'IKne3meq5aSn9XLyUdCD', name: 'Charlie (Australian Male, Natural)' },
+  { id: 'XrExE9yKIg1WjnnlVkGX', name: 'Matilda (American Female, Warm)' },
+];
+
 const DEFAULT = {
   name: '',
   system_prompt: 'You are a helpful voice assistant. Keep responses concise and conversational.',
@@ -26,16 +46,20 @@ export default function AgentEditor() {
   const [devices, setDevices] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [voicePreset, setVoicePreset] = useState('custom');
 
   useEffect(() => {
     if (!isNew) {
       getAgent(id).then(a => {
+        const voiceId = a.elevenlabs_voice_id || '';
+        const preset = PRESET_VOICES.find(v => v.id === voiceId);
+        setVoicePreset(preset ? voiceId : (voiceId ? 'custom' : 'custom'));
         setForm({
           name: a.name,
           system_prompt: a.system_prompt,
           llm_provider: a.llm_provider,
           llm_model: a.llm_model,
-          elevenlabs_voice_id: a.elevenlabs_voice_id || '',
+          elevenlabs_voice_id: voiceId,
           elevenlabs_stability: a.elevenlabs_stability,
           elevenlabs_similarity: a.elevenlabs_similarity,
         });
@@ -43,6 +67,14 @@ export default function AgentEditor() {
       });
     }
   }, [id]);
+
+  function handleVoicePreset(e) {
+    const val = e.target.value;
+    setVoicePreset(val);
+    if (val !== 'custom') {
+      setForm(f => ({ ...f, elevenlabs_voice_id: val }));
+    }
+  }
 
   const set = (k) => (e) => {
     const val = e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value;
@@ -106,9 +138,19 @@ export default function AgentEditor() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">ElevenLabs Voice ID</label>
-          <input value={form.elevenlabs_voice_id} onChange={set('elevenlabs_voice_id')} placeholder="Paste voice ID from ElevenLabs"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-yellow-400 outline-none" />
+          <label className="block text-sm font-medium text-gray-700 mb-1">ElevenLabs Voice</label>
+          <select value={voicePreset} onChange={handleVoicePreset}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-yellow-400 outline-none mb-2">
+            {PRESET_VOICES.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+          {voicePreset === 'custom' && (
+            <input value={form.elevenlabs_voice_id} onChange={set('elevenlabs_voice_id')}
+              placeholder="Paste custom Voice ID from ElevenLabs"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-yellow-400 outline-none" />
+          )}
+          {voicePreset !== 'custom' && (
+            <p className="text-xs text-gray-400 mt-1">Voice ID: <span className="font-mono">{form.elevenlabs_voice_id}</span></p>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
