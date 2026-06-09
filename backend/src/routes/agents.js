@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db/db.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { synthesizeSpeech } from '../services/tts.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -115,6 +116,22 @@ router.delete('/:id', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete agent' });
+  }
+});
+
+router.post('/test-voice', async (req, res) => {
+  const { elevenlabs_voice_id, elevenlabs_stability, elevenlabs_similarity } = req.body;
+  if (!elevenlabs_voice_id) return res.status(400).json({ error: 'voice_id is required' });
+  try {
+    const audio = await synthesizeSpeech(
+      'Hello, I am your Hive voice assistant. How can I help you today?',
+      { elevenlabs_voice_id, elevenlabs_stability: elevenlabs_stability ?? 0.5, elevenlabs_similarity: elevenlabs_similarity ?? 0.75 }
+    );
+    res.set('Content-Type', 'audio/mpeg');
+    res.send(audio);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
