@@ -22,9 +22,6 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 // Public — device polls this on boot
 router.get('/latest', async (req, res) => {
   const { device_id, version } = req.query;
-  if (!device_id || !version) {
-    return res.status(400).json({ error: 'device_id and version are required' });
-  }
   try {
     const fwResult = await pool.query(
       'SELECT * FROM firmware_versions WHERE is_latest = TRUE LIMIT 1'
@@ -43,10 +40,12 @@ router.get('/latest', async (req, res) => {
       { expiresIn: 3600 }
     );
 
-    await pool.query(
-      `UPDATE devices SET last_seen = NOW(), firmware_version = $1 WHERE id = $2`,
-      [version, device_id]
-    );
+    if (device_id && version) {
+      await pool.query(
+        `UPDATE devices SET last_seen = NOW(), firmware_version = $1 WHERE id = $2`,
+        [version, device_id]
+      );
+    }
 
     res.json({ update_available: true, version: latest.version, url });
   } catch (err) {
