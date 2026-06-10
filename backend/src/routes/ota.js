@@ -54,6 +54,45 @@ router.get('/latest', async (req, res) => {
   }
 });
 
+// Public — xiaozhi firmware POSTs device info here on boot.
+// Response shape follows the xiaozhi OTA protocol: it must include the
+// websocket endpoint (this is how devices discover the server) and the
+// latest firmware version/url.
+router.post('/latest', async (req, res) => {
+  const deviceInfo = req.body || {};
+  const currentVersion = deviceInfo.application?.version || null;
+
+  try {
+    let firmware = { version: currentVersion || '0.0.0', url: '' };
+    const fwResult = await pool.query(
+      'SELECT * FROM firmware_versions WHERE is_latest = TRUE LIMIT 1'
+    );
+    if (fwResult.rows.length && fwResult.rows[0].version !== currentVersion) {
+      const latest = fwResult.rows[0];
+      const url = await getSignedUrl(
+        s3,
+        new GetObjectCommand({ Bucket: process.env.S3_BUCKET, Key: latest.s3_key }),
+        { expiresIn: 3600 }
+      );
+      firmware = { version: latest.version, url };
+    }
+
+    res.json({
+      firmware,
+      websocket: {
+        url: process.env.WEBSOCKET_URL || 'wss://api.wifiwatch.net/ws',
+      },
+      server_time: {
+        timestamp: Date.now(),
+        timezone_offset: 0,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'OTA check failed' });
+  }
+});
+
 // Public — flasher fetches version list
 router.get('/versions', async (req, res) => {
   try {
